@@ -110,8 +110,27 @@
   <!-- MAIN GAME CANVAS -->
   <canvas id="gameCanvas"></canvas>
 
+  <!-- PORTRAIT ORIENTATION WARNING OVERLAY -->
+  <div id="portraitWarningOverlay" class="hidden fixed inset-0 z-[999] flex flex-col items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl text-center">
+    <div class="w-20 h-20 mb-5 rounded-3xl bg-amber-500/15 border border-amber-400/50 flex items-center justify-center text-4xl animate-bounce shadow-[0_0_25px_rgba(251,191,36,0.35)]">
+      📱↻
+    </div>
+    <span class="px-3 py-1 rounded-full bg-rose-500/20 border border-rose-500/50 text-rose-300 font-tactical font-bold text-xs tracking-widest uppercase mb-3">
+      TRÒ CHƠI TẠM DỪNG
+    </span>
+    <h2 class="font-tactical font-extrabold text-2xl sm:text-3xl text-white mb-2">
+      VUI LÒNG XOAY NGANG MÀN HÌNH
+    </h2>
+    <p class="text-slate-300 text-xs sm:text-sm max-w-sm leading-relaxed">
+      <b class="text-emerald-400">IRON TREAD: OVERDRIVE</b> chỉ hỗ trợ chế độ màn hình ngang (Landscape) để đảm bảo tầm nhìn chiến trường. Hãy xoay ngang thiết bị hoặc mở rộng chiều ngang cửa sổ để tiếp tục.
+    </p>
+  </div>
+
+  <!-- SCALED UI & HUD WRAPPER (TỰ ĐỘNG CO GIÃN THEO TỶ LỆ MÀN HÌNH) -->
+  <div id="uiScaleContainer" class="fixed inset-0 pointer-events-none z-20 origin-top-left">
+
   <!-- TOP-RIGHT CONTROLLER & USER STATUS PILL -->
-  <div class="fixed top-4 right-4 z-40 flex items-center gap-2">
+  <div class="fixed top-4 right-4 z-40 flex items-center gap-2 pointer-events-auto">
     <div id="userBadge" class="hidden glass-panel px-3.5 py-2 rounded-full items-center gap-2 text-xs font-tactical font-bold text-emerald-300 shadow-lg border border-emerald-500/30">
       <span>🎖</span>
       <span id="currentUserLabel">PLAYER</span>
@@ -901,7 +920,10 @@
     </div>
   </div>
 
+  </div><!-- END #uiScaleContainer -->
+
   <script>
+
     /**
      * ============================================================================
      * IRON TREAD: OVERDRIVE
@@ -2154,19 +2176,59 @@
     let lockedTarget = null;
     let rightStickSwitchCooldown = 0;
 
-    const camera = { x: MAP_SIZE / 2, y: MAP_SIZE / 2 };
+        const camera = { x: MAP_SIZE / 2, y: MAP_SIZE / 2, zoom: 1 };
+    const BASE_VIEW_WIDTH = 1280;
+    const BASE_VIEW_HEIGHT = 720;
+    let isPortraitBlocked = false;
 
     const keys = {};
     const mouse = { x: 0, y: 0, down: false };
     let prevGpButtons = [];
     let bigRadarOpen = false;
 
-    function resizeCanvas() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+        function checkScreenOrientationAndZoom() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      canvas.width = w;
+      canvas.height = h;
+
+      // 1. Tự động tính tỷ lệ zoom phù hợp kích thước màn hình (giới hạn từ 0.5x đến 1.6x)
+      const scaleX = w / BASE_VIEW_WIDTH;
+      const scaleY = h / BASE_VIEW_HEIGHT;
+      camera.zoom = clamp(Math.min(scaleX, scaleY), 0.5, 1.6);
+
+      // 2. Tự động thu phóng toàn bộ UI & HUD gọn gàng theo kích thước màn hình
+      const uiContainer = document.getElementById('uiScaleContainer');
+      if (uiContainer) {
+        // UI thu nhỏ theo màn hình (tối thiểu 52% trên mobile ngang, tối đa 115% trên màn hình lớn)
+        const uiScale = clamp(Math.min(scaleX, scaleY), 0.52, 1.15);
+        if ('zoom' in uiContainer.style) {
+          uiContainer.style.zoom = uiScale;
+          uiContainer.style.width = '100%';
+          uiContainer.style.height = '100%';
+          uiContainer.style.transform = '';
+        } else {
+          // Fallback cho Firefox / trình duyệt không hỗ trợ CSS zoom
+          uiContainer.style.transform = `scale(${uiScale})`;
+          uiContainer.style.width = `${100 / uiScale}%`;
+          uiContainer.style.height = `${100 / uiScale}%`;
+        }
+      }
+
+      // 3. Kiểm tra màn hình dọc (Portrait) -> Cảnh báo & Dừng trò chơi
+      const warningEl = document.getElementById('portraitWarningOverlay');
+      isPortraitBlocked = h > w;
+
+      if (warningEl) {
+        warningEl.classList.toggle('hidden', !isPortraitBlocked);
+      }
+      if (isPortraitBlocked) {
+        mouse.down = false; // Ngắt trạng thái giữ bắn khi màn hình bị xoay dọc
+      }
     }
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas();
+    window.addEventListener('resize', checkScreenOrientationAndZoom);
+    window.addEventListener('orientationchange', checkScreenOrientationAndZoom);
+    checkScreenOrientationAndZoom();
 
     function dist(x1, y1, x2, y2) {
       return Math.hypot(x2 - x1, y2 - y1);
@@ -3235,12 +3297,12 @@
         if ((fireBind.startsWith('Mouse') && mouse.down) || (!fireBind.startsWith('Mouse') && keys[fireBind])) {
           firePlayerWeapon();
         }
-
         if (!lockedTarget) {
-          const worldMouseX = mouse.x - canvas.width / 2 + camera.x;
-          const worldMouseY = mouse.y - canvas.height / 2 + camera.y;
+          const worldMouseX = (mouse.x - canvas.width / 2) / camera.zoom + camera.x;
+          const worldMouseY = (mouse.y - canvas.height / 2) / camera.zoom + camera.y;
           player.turretAngle = Math.atan2(worldMouseY - player.y, worldMouseX - player.x);
         }
+
       }
 
       const curSpec = getCurrentPlayerAmmoSpec();
@@ -3473,6 +3535,8 @@
 
     // --- MAIN SIMULATION UPDATE ---
     function update(dt) {
+      if (isPortraitBlocked) return; // Dừng toàn bộ trò chơi khi màn hình đang xoay dọc
+
       if (!loadoutModal.classList.contains('hidden')) {
         renderLoadoutTankPreview(dt);
       }
@@ -4702,9 +4766,10 @@
         shakeX = (Math.random() - 0.5) * screenShakeMagnitude * 2;
         shakeY = (Math.random() - 0.5) * screenShakeMagnitude * 2;
       }
-      const offsetX = canvas.width / 2 - camera.x + shakeX;
-      const offsetY = canvas.height / 2 - camera.y + shakeY;
-      ctx.translate(offsetX, offsetY);
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.scale(camera.zoom, camera.zoom);
+      ctx.translate(-camera.x + shakeX, -camera.y + shakeY);
+
 
       ctx.fillStyle = '#131a22';
       ctx.fillRect(0, 0, MAP_SIZE, MAP_SIZE);
