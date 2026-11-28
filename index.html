@@ -536,7 +536,7 @@
 
           <div class="mt-4 pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 font-tactical flex items-center justify-between">
             <span>Kho đạn:</span>
-            <span class="text-emerald-300 font-bold">Nổ • Nảy • EMP • Chùm • Nhiễu Từ</span>
+            <span class="text-emerald-300 font-bold">Nổ • Nảy • EMP • Chùm • Nhiễu Từ • Lửa • Sét</span>
           </div>
         </div>
 
@@ -1147,6 +1147,48 @@
         jammerDuration: 0,
         dropCount: 3,
         desc: 'Buff: 5 viên x 2 DMG (như đạn thường) | Debuff: +15% hồi Dash'
+      },
+      INCENDIARY: {
+        id: 'INCENDIARY',
+        name: 'ĐẠN LỬA (NAPALM)',
+        short: 'Đạn Lửa',
+        color: '#f97316',
+        speed: 585,            // Debuff: Giảm 25% tốc độ bay (780 * 0.75 = 585)
+        damage: 1.7,           // Debuff: Giảm 15% sát thương trực tiếp (2 * 0.85 = 1.7)
+        fireRateMult: 0.90,
+        moveSpeedMult: 1.0,
+        turnRateMult: 1.0,
+        dashCdMult: 1.0,
+        reloadSpeedMult: 1.0,
+        bounces: 0,
+        piercing: false,
+        explosiveRadius: 0,
+        jammerDuration: 0,
+        fireZoneRadius: 95,
+        fireZoneDuration: 3.5,
+        dropCount: 3,
+        desc: 'Buff: Vùng lửa cháy 3.5s (DoT + đốt cây) | Debuff: -25% tốc bay & -15% DMG'
+      },
+      LIGHTNING: {
+        id: 'LIGHTNING',
+        name: 'ĐẠN SÉT (ARC)',
+        short: 'Đạn Sét',
+        color: '#38bdf8',
+        speed: 860,
+        damage: 1.8,
+        fireRateMult: 1.05,
+        moveSpeedMult: 1.0,
+        turnRateMult: 1.0,
+        dashCdMult: 1.0,
+        reloadSpeedMult: 0.85, // Debuff: Giảm 15% tốc độ nạp đạn
+        bounces: 0,
+        piercing: false,
+        explosiveRadius: 0,
+        jammerDuration: 0,
+        chainRange: 210,
+        maxChains: 2,
+        dropCount: 3,
+        desc: 'Buff: Giật lan 2 địch + Làm chậm 2s | Debuff: -15% tốc nạp & ngắt 1.75s sau 3 phát'
       }
     };
 
@@ -1157,7 +1199,7 @@
       return slots[player.ammoSlotIdx] || AMMO_CATALOG.NORMAL;
     }
 
-    const SPECIAL_AMMO_KEYS = ['EXPLOSIVE', 'JAMMER', 'RICOCHET', 'EMP', 'SCATTER'];
+    const SPECIAL_AMMO_KEYS = ['EXPLOSIVE', 'JAMMER', 'RICOCHET', 'EMP', 'SCATTER', 'INCENDIARY', 'LIGHTNING'];
     const SKILL_KEYS = ['SMOKE', 'CIWS', 'CLONE'];
 
     const playerLoadout = {
@@ -1830,6 +1872,12 @@
       shoot(ammoId) {
         if (ammoId === 'EMP' || ammoId === 'JAMMER') {
           this.playTone(950, 180, 0.22, 'sawtooth', 0.25);
+        } else if (ammoId === 'LIGHTNING') {
+          this.playTone(1450, 260, 0.18, 'sawtooth', 0.26);
+          this.playNoise(0.14, 2600, 0.24);
+        } else if (ammoId === 'INCENDIARY') {
+          this.playNoise(0.35, 480, 0.38);
+          this.playTone(190, 65, 0.25, 'triangle', 0.28);
         } else if (ammoId === 'SCATTER') {
           this.playNoise(0.25, 1200, 0.4);
           this.playTone(160, 45, 0.2, 'square', 0.25);
@@ -2265,6 +2313,8 @@
     let pickups = [];
     let treadMarks = [];
     let ciwsTracers = [];
+    let fireZones = [];      // Vùng lửa cháy diện rộng của Đạn Lửa
+    let lightningArcs = [];  // Hiệu ứng tia sét giật chuỗi của Đạn Sét
     let enemyWrecks = []; // Lưu trữ xác xe tăng địch tồn tại 2 giây
     let debrisParticles = []; // Lưu trữ các mảnh văng kim loại khi phá hủy xác xe
     let floatingTexts = []; // Chữ nổi CRIT! / PARRY! trên bản đồ
@@ -2459,6 +2509,8 @@
       pickups = [];
       treadMarks = [];
       ciwsTracers = [];
+      fireZones = [];
+      lightningArcs = [];
       enemyWrecks = [];
       debrisParticles = [];
       clones = [];
@@ -2563,6 +2615,8 @@
         reloadTimer: 0,
         reloadDuration: 1.25,
         fireCooldown: 0,
+        lightningBurstCount: 0,    // Đếm số viên đạn sét đã bắn liên tục
+        lightningLockoutTimer: 0,  // Thời gian ngắt nghỉ 1.75s khi bắn đủ 3 viên
         specialSkill: playerLoadout.specialSkill,
         specialCooldown: 0,
         hasCiws: playerLoadout.specialSkill === 'CIWS',
@@ -2630,6 +2684,11 @@
           strafeDir: Math.random() < 0.5 ? 1 : -1,
           stunTimer: 0,
           jammedTimer: 0,
+          burnTimer: 0,
+          burnTickTimer: 0,
+          shockTimer: 0,
+          shockMoveMult: 1.0,
+          shockTurretMult: 1.0,
           revealedTimer: 0,
           radarPingAlpha: 0,
           treadPhase: 0,
@@ -2869,6 +2928,98 @@
       }
     }
 
+    // --- INCENDIARY FIRE ZONE (TỒN TẠI 3.5s, ĐỐT CÂY & GÂY DoT) ---
+    function spawnFireZone(x, y, isOverdrive = false) {
+      const radius = isOverdrive ? 120 : 95;
+      const duration = 3.5;
+
+      fireZones.push({
+        x,
+        y,
+        r: radius,
+        life: duration,
+        maxLife: duration,
+        sparkTimer: 0
+      });
+
+      spawnExplosion(x, y, '#f97316', 20);
+      sfx.explosion();
+      triggerRumble(140, 0.5, 0.55, 2);
+
+      // Buff: Phá hủy ngay các vật cản thực vật (cây cối) trong phạm vi vùng lửa
+      for (let ti = trees.length - 1; ti >= 0; ti--) {
+        if (dist(x, y, trees[ti].x, trees[ti].y) <= radius + trees[ti].r * 0.55) {
+          spawnExplosion(trees[ti].x, trees[ti].y, '#fb923c', 10);
+          trees.splice(ti, 1);
+        }
+      }
+    }
+
+    // --- LIGHTNING CHAIN & SLOW EFFECT (GIẬT TỐI ĐA 2 ĐỊCH LÂN CẬN + LÀM CHẬM 2s) ---
+    function triggerLightningHit(primaryEnemy, baseDamage, isOverdrive = false) {
+      if (!primaryEnemy) return;
+
+      // Mục tiêu chính: -10% tốc độ di chuyển & -15% tốc độ xoay pháo trong 2s
+      primaryEnemy.shockTimer = 2.0;
+      primaryEnemy.shockMoveMult = 0.90;
+      primaryEnemy.shockTurretMult = 0.85;
+
+      spawnExplosion(primaryEnemy.x, primaryEnemy.y, '#38bdf8', 16);
+      sfx.jammerHit();
+      triggerRumble(150, 0.6, 0.5, 3);
+
+      const chainRange = isOverdrive ? 260 : 210;
+      const maxChains = 2; // Giật lan tối đa 2 kẻ địch gần nhất tại thời điểm trúng đạn
+
+      const nearby = enemies
+        .filter(e => e && e !== primaryEnemy && e.hp > 0 && dist(primaryEnemy.x, primaryEnemy.y, e.x, e.y) <= chainRange)
+        .sort((a, b) => dist(primaryEnemy.x, primaryEnemy.y, a.x, a.y) - dist(primaryEnemy.x, primaryEnemy.y, b.x, b.y))
+        .slice(0, maxChains);
+
+      let prevX = primaryEnemy.x;
+      let prevY = primaryEnemy.y;
+
+      for (const target of nearby) {
+        // Tạo đường sét nối từ mục tiêu trước sang mục tiêu kế tiếp
+        lightningArcs.push({
+          x1: prevX,
+          y1: prevY,
+          x2: target.x,
+          y2: target.y,
+          life: 0.28,
+          maxLife: 0.28
+        });
+
+        // Kẻ địch đứng gần: -5% tốc độ di chuyển & -10% tốc độ xoay pháo trong 2s
+        target.shockTimer = 2.0;
+        target.shockMoveMult = 0.95;
+        target.shockTurretMult = 0.90;
+
+        // Sát thương lan bằng 60% sát thương gốc
+        const chainDmg = Number((baseDamage * 0.6).toFixed(2));
+        target.hp -= chainDmg;
+        spawnExplosion(target.x, target.y, '#7dd3fc', 12);
+        spawnFloatingText(target.x, target.y - target.radius - 12, `⚡ -${chainDmg}`, '#38bdf8');
+
+        prevX = target.x;
+        prevY = target.y;
+      }
+
+      // Hạ gục mục tiêu chính nếu hết máu (tìm lại đúng index hiện tại)
+      const primaryIdx = enemies.indexOf(primaryEnemy);
+      if (primaryIdx !== -1 && primaryEnemy.hp <= 0) {
+        handleEnemyDestroyed(primaryIdx);
+      }
+
+      // Hạ gục các mục tiêu phụ bị sét lan chết (tìm lại đúng index từng con để không bị lệch mảng)
+      for (const target of nearby) {
+        const targetIdx = enemies.indexOf(target);
+        if (targetIdx !== -1 && target.hp <= 0) {
+          handleEnemyDestroyed(targetIdx);
+        }
+      }
+    }
+
     function handleEnemyDestroyed(ei) {
       const e = enemies[ei];
       // VFX nổ lớn kèm sóng xung kích
@@ -3030,6 +3181,12 @@
       const isOverdrive = player.overdriveTimer > 0;
       const slotIdx = player.ammoSlotIdx;
       const activeSlots = getActiveAmmoSlots();
+      const previewSpec = activeSlots[slotIdx];
+
+      // Debuff Đạn Sét: Đang trong thời gian ngắt nghỉ 1.75s sau khi bắn 3 viên liên tiếp
+      if (previewSpec && previewSpec.id === 'LIGHTNING' && player.lightningLockoutTimer > 0) {
+        return;
+      }
 
       if (slotIdx > 0 && player.specialAmmo[slotIdx] <= 0) {
         player.ammoSlotIdx = 0;
@@ -3115,6 +3272,19 @@
       sfx.shoot(spec.id);
       triggerRumble(145, 0.45, 0.78, 3);
       addScreenShake(isOverdrive ? 7 : 5, 0.14);
+
+      // Xử lý Debuff quá nhiệt Đạn Sét (3 viên liên tục -> nghỉ 1.75s)
+      if (spec.id === 'LIGHTNING') {
+        player.lightningBurstCount = (player.lightningBurstCount || 0) + 1;
+        if (player.lightningBurstCount >= 3) {
+          player.lightningBurstCount = 0;
+          player.lightningLockoutTimer = 1.75;
+          sfx.uiTick();
+          showToast('⚡ QUÁ TẢI ĐẠN SÉT! NGẮT NGHỈ 1.75s', 1600);
+        }
+      } else {
+        player.lightningBurstCount = 0;
+      }
 
       if (slotIdx > 0 && player.specialAmmo[slotIdx] <= 0) {
         player.ammoSlotIdx = 0;
@@ -3681,6 +3851,7 @@
       if (gameState !== 'PLAYING' || !player) return;
 
       player.fireCooldown = Math.max(0, player.fireCooldown - dt);
+      player.lightningLockoutTimer = Math.max(0, (player.lightningLockoutTimer || 0) - dt);
       player.specialCooldown = Math.max(0, player.specialCooldown - dt);
       player.dashCooldown = Math.max(0, player.dashCooldown - dt);
       player.forwardDashCooldown = Math.max(0, player.forwardDashCooldown - dt);
@@ -3907,6 +4078,45 @@
         if (ft.life <= 0) floatingTexts.splice(i, 1);
       }
 
+      // Cập nhật hiệu ứng Tia Sét
+      for (let i = lightningArcs.length - 1; i >= 0; i--) {
+        lightningArcs[i].life -= dt;
+        if (lightningArcs[i].life <= 0) lightningArcs.splice(i, 1);
+      }
+
+      // Cập nhật Vùng Lửa Cháy (3.5s) & đốt kẻ địch đi qua
+      for (let i = fireZones.length - 1; i >= 0; i--) {
+        const fz = fireZones[i];
+        fz.life -= dt;
+        fz.sparkTimer -= dt;
+
+        // Sinh hạt lửa bốc lên trong vùng cháy
+        if (fz.sparkTimer <= 0) {
+          fz.sparkTimer = 0.06;
+          const ang = Math.random() * Math.PI * 2;
+          const rDist = Math.random() * (fz.r * 0.85);
+          particles.push({
+            x: fz.x + Math.cos(ang) * rDist,
+            y: fz.y + Math.sin(ang) * rDist,
+            vx: (Math.random() - 0.5) * 20,
+            vy: -30 - Math.random() * 40,
+            r: 3.5 + Math.random() * 4.5,
+            color: Math.random() < 0.65 ? '#f97316' : '#fde047',
+            life: 0.35,
+            maxLife: 0.35
+          });
+        }
+
+        // Xe địch đi ngang qua vùng lửa sẽ bị áp hiệu ứng thiêu đốt (burnTimer)
+        for (const e of enemies) {
+          if (dist(fz.x, fz.y, e.x, e.y) <= fz.r + e.radius * 0.7) {
+            e.burnTimer = Math.max(e.burnTimer || 0, 1.5);
+          }
+        }
+
+        if (fz.life <= 0) fireZones.splice(i, 1);
+      }
+
       for (let i = smokeClouds.length - 1; i >= 0; i--) {
         const s = smokeClouds[i];
         s.x += s.vx * dt;
@@ -3986,6 +4196,31 @@
         e.recoilOffset = Math.max(0, e.recoilOffset - 30 * dt);
         e.revealedTimer = Math.max(0, e.revealedTimer - dt);
 
+        // Xử lý sát thương thiêu đốt theo thời gian (DoT) từ Đạn Lửa
+        if (e.burnTimer > 0) {
+          e.burnTimer = Math.max(0, e.burnTimer - dt);
+          e.burnTickTimer = (e.burnTickTimer || 0) - dt;
+          if (e.burnTickTimer <= 0) {
+            e.burnTickTimer = 0.5; // Mỗi 0.5s đốt 0.45 DMG (= 0.9 DMG/giây)
+            const burnDmg = 0.45;
+            e.hp -= burnDmg;
+            spawnExplosion(e.x, e.y, '#f97316', 5);
+            spawnFloatingText(e.x, e.y - e.radius - 10, `🔥 -${burnDmg}`, '#fb923c');
+            if (e.hp <= 0) {
+              handleEnemyDestroyed(i);
+              continue;
+            }
+          }
+        }
+
+        // Cập nhật thời gian hiệu ứng làm chậm từ Đạn Sét
+        if (e.shockTimer > 0) {
+          e.shockTimer = Math.max(0, e.shockTimer - dt);
+        } else {
+          e.shockMoveMult = 1.0;
+          e.shockTurretMult = 1.0;
+        }
+
         // Jammer disable (1.75s) or EMP stun check
         if (e.jammedTimer > 0) {
           e.jammedTimer = Math.max(0, e.jammedTimer - dt);
@@ -4062,8 +4297,9 @@
             moveFactor = 0.7;
           }
 
+          const turretTurnSpeed = 2.6 * (e.shockTurretMult || 1.0);
           const turretDiff = normalizeAngle(angleToTarget - e.turretAngle);
-          e.turretAngle = normalizeAngle(e.turretAngle + clamp(turretDiff, -2.6 * dt, 2.6 * dt));
+          e.turretAngle = normalizeAngle(e.turretAngle + clamp(turretDiff, -turretTurnSpeed * dt, turretTurnSpeed * dt));
 
           e.fireCooldown -= dt;
           if (e.fireCooldown <= 0 && Math.abs(turretDiff) < 0.22 && dToTarget < 760) {
@@ -4096,9 +4332,10 @@
         const bodyDiff = normalizeAngle(desiredBodyAngle - e.bodyAngle);
         e.bodyAngle = normalizeAngle(e.bodyAngle + clamp(bodyDiff, -2.5 * dt, 2.5 * dt));
 
-        e.x += Math.cos(e.bodyAngle) * e.speed * moveFactor * dt;
-        e.y += Math.sin(e.bodyAngle) * e.speed * moveFactor * dt;
-        e.treadPhase += e.speed * moveFactor * 0.6 * dt;
+        const effectiveSpeed = e.speed * (e.shockMoveMult || 1.0);
+        e.x += Math.cos(e.bodyAngle) * effectiveSpeed * moveFactor * dt;
+        e.y += Math.sin(e.bodyAngle) * effectiveSpeed * moveFactor * dt;
+        e.treadPhase += effectiveSpeed * moveFactor * 0.6 * dt;
 
         resolveTankObstacles(e, false);
 
@@ -4184,6 +4421,8 @@
             } else {
               if (b.explosiveRadius > 0 && b.owner === 'PLAYER') {
                 detonateExplosiveShell(b.x, b.y, b.damage, b.isOverdrive);
+              } else if (b.ammoId === 'INCENDIARY' && b.owner === 'PLAYER') {
+                spawnFireZone(b.x, b.y, b.isOverdrive);
               } else {
                 spawnExplosion(b.x, b.y, b.color, 8);
               }
@@ -4259,6 +4498,16 @@
 
               if (b.explosiveRadius > 0) {
                 detonateExplosiveShell(b.x, b.y, finalDamage, b.isOverdrive);
+              } else if (b.ammoId === 'INCENDIARY') {
+                e.hp -= finalDamage;
+                e.burnTimer = Math.max(e.burnTimer || 0, 2.0);
+                spawnFireZone(b.x, b.y, b.isOverdrive);
+                if (e.hp <= 0) {
+                  handleEnemyDestroyed(ei);
+                }
+              } else if (b.ammoId === 'LIGHTNING') {
+                e.hp -= finalDamage;
+                triggerLightningHit(e, finalDamage, b.isOverdrive);
               } else if (b.ammoId === 'JAMMER') {
                 e.hp -= finalDamage;
                 triggerJammerHit(e, b.x, b.y);
@@ -4636,6 +4885,42 @@
         ctx.fillRect(38 - recoil, -8, 4, 5);
         ctx.fillRect(38 - recoil, 3, 4, 5);
 
+      } else if (isPlayer && currentAmmoId === 'INCENDIARY') {
+        // 6. ĐẠN LỬA (NAPALM): Nòng phun lửa có lỗ tản nhiệt & bình dẫn nhiên liệu cam
+        ctx.beginPath();
+        ctx.roundRect(8 - recoil, -6, 28, 12, 3);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#f97316';
+        ctx.fillRect(14 - recoil, -7.5, 12, 15);
+        ctx.fillStyle = tipColor;
+        ctx.beginPath();
+        ctx.roundRect(34 - recoil, -7.5, 7, 15, 2);
+        ctx.fill();
+        ctx.stroke();
+
+      } else if (isPlayer && currentAmmoId === 'LIGHTNING') {
+        // 7. ĐẠN SÉT (ARC): Nòng cuộn Tesla với 3 vòng đồng phát điện
+        ctx.beginPath();
+        ctx.roundRect(8 - recoil, -4, 32, 8, 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2.5;
+        [17, 25, 33].forEach((rx) => {
+          ctx.beginPath();
+          ctx.moveTo(rx - recoil, -7.5);
+          ctx.lineTo(rx - recoil, 7.5);
+          ctx.stroke();
+        });
+
+        ctx.fillStyle = '#7dd3fc';
+        ctx.beginPath();
+        ctx.arc(41 - recoil, 0, 4, 0, Math.PI * 2);
+        ctx.fill();
+
       } else {
         // ĐẠN THƯỜNG (NORMAL) & XE ĐỊCH: Nòng tiêu chuẩn
         ctx.beginPath();
@@ -5009,6 +5294,31 @@
         ctx.restore();
       }
 
+      // Vẽ Vùng Lửa Cháy diện rộng trên mặt đất
+      for (const fz of fireZones) {
+        const alpha = Math.min(1, fz.life / 0.6);
+        const flicker = Math.sin(performance.now() * 0.02 + fz.x) * 4;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+
+        const grad = ctx.createRadialGradient(fz.x, fz.y, 10, fz.x, fz.y, fz.r + flicker);
+        grad.addColorStop(0, 'rgba(253, 224, 71, 0.45)');
+        grad.addColorStop(0.55, 'rgba(249, 115, 22, 0.35)');
+        grad.addColorStop(1, 'rgba(234, 88, 12, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(fz.x, fz.y, fz.r + flicker, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(251, 146, 60, 0.65)';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([10, 6]);
+        ctx.beginPath();
+        ctx.arc(fz.x, fz.y, fz.r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       const pulse = 1 + Math.sin(performance.now() * 0.008) * 0.12;
       for (const p of pickups) {
         ctx.save();
@@ -5168,6 +5478,27 @@
         ctx.beginPath();
         ctx.moveTo(tr.x1, tr.y1);
         ctx.lineTo(tr.x2, tr.y2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Vẽ tia sét giật chuỗi giữa các xe địch
+      for (const arc of lightningArcs) {
+        ctx.save();
+        ctx.strokeStyle = `rgba(56, 189, 248, ${arc.life / arc.maxLife})`;
+        ctx.lineWidth = 3;
+        ctx.shadowColor = '#38bdf8';
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.moveTo(arc.x1, arc.y1);
+        const segments = 5;
+        for (let s = 1; s < segments; s++) {
+          const t = s / segments;
+          const midX = arc.x1 + (arc.x2 - arc.x1) * t + (Math.random() - 0.5) * 26;
+          const midY = arc.y1 + (arc.y2 - arc.y1) * t + (Math.random() - 0.5) * 26;
+          ctx.lineTo(midX, midY);
+        }
+        ctx.lineTo(arc.x2, arc.y2);
         ctx.stroke();
         ctx.restore();
       }
@@ -5566,12 +5897,17 @@
       document.getElementById('enemyCountText').textContent = isPracticeMode ? `${enemies.length} BIA` : enemies.length;
       document.getElementById('scoreText').textContent = score;
 
-      document.getElementById('ammoCountText').textContent = player.reloading
-        ? 'RELOAD'
-        : `${player.ammo}/${player.maxAmmo}`;
-
       const activeSlots = getActiveAmmoSlots();
       const spec = activeSlots[player.ammoSlotIdx];
+
+      if (spec.id === 'LIGHTNING' && player.lightningLockoutTimer > 0) {
+        document.getElementById('ammoCountText').textContent = `NGHỈ ${player.lightningLockoutTimer.toFixed(1)}s`;
+      } else {
+        document.getElementById('ammoCountText').textContent = player.reloading
+          ? 'RELOAD'
+          : `${player.ammo}/${player.maxAmmo}`;
+      }
+
       const ammoNameEl = document.getElementById('ammoTypeName');
       ammoNameEl.textContent = `[${spec.slot}] ${spec.name}`;
       ammoNameEl.style.color = spec.color;
